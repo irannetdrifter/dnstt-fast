@@ -493,7 +493,7 @@ do_install() {
     else
         echo -ne ": "
     fi
-    read -r input
+    read -r </dev/tty input </dev/tty
     NS_SUBDOMAIN="${input:-$NS_SUBDOMAIN}"
 
     if [ -z "$NS_SUBDOMAIN" ]; then
@@ -503,7 +503,7 @@ do_install() {
 
     # Get MTU
     print_question "Enter MTU value [${YELLOW}${MTU_VALUE:-1232}${NC}]: "
-    read -r input
+    read -r </dev/tty input </dev/tty
     MTU_VALUE="${input:-${MTU_VALUE:-1232}}"
 
     # Get tunnel mode
@@ -512,7 +512,7 @@ do_install() {
     echo "  1) SOCKS proxy (Dante on 127.0.0.1:1080)"
     echo "  2) SSH"
     print_question "Select mode [${YELLOW}1${NC}]: "
-    read -r mode_choice
+    read -r </dev/tty mode_choice </dev/tty
     case "$mode_choice" in
         2) TUNNEL_MODE="ssh" ;;
         *) TUNNEL_MODE="socks" ;;
@@ -525,7 +525,7 @@ do_install() {
     echo -e "  Mode:      ${YELLOW}$TUNNEL_MODE${NC}"
     echo ""
     print_question "Continue? (Y/n): "
-    read -r confirm
+    read -r </dev/tty confirm </dev/tty
     if [ "$confirm" = "n" ] || [ "$confirm" = "N" ]; then
         exit 0
     fi
@@ -622,7 +622,7 @@ show_menu() {
 handle_menu() {
     while true; do
         show_menu
-        read -r choice
+        read -r </dev/tty choice </dev/tty
 
         case $choice in
             1) do_install ;;
@@ -643,7 +643,7 @@ handle_menu() {
         if [ "$choice" != "5" ]; then
             echo ""
             print_question "Press Enter to continue..."
-            read -r
+            read -r </dev/tty
         fi
     done
 }
@@ -667,4 +667,4 @@ main() {
     fi
 }
 
-main "$@"
+main "$@" </dev/tty
