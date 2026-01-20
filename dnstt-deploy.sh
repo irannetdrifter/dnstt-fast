@@ -1,31 +1,106 @@
 #!/bin/bash
-#
-# dnstt-server deployment script
-# Based on bugfloyd/dnstt-deploy structure
-#
+
+# dnstt-fast Server Setup Script
+# https://github.com/irannetdrifter/dnstt-fast
 
 set -e
 
-# Configuration
-INSTALL_DIR="/usr/local/bin"
-CONFIG_DIR="/etc/dnstt"
-CONFIG_FILE="$CONFIG_DIR/dnstt.conf"
-DNSTT_USER="dnstt"
-SERVICE_NAME="dnstt-server"
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Check if running as root
+if [[ $EUID -ne 0 ]]; then
+    echo -e "\033[0;31m[ERROR]\033[0m This script must be run as root"
+    exit 1
+fi
 
-# Colors
+# Color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[1;36m'
+WHITE='\033[1;37m'
 NC='\033[0m'
 
-# Detect OS and package manager
-detect_system() {
+# Global variables
+GITHUB_REPO="irannetdrifter/dnstt-fast"
+GITHUB_RAW="https://raw.githubusercontent.com/$GITHUB_REPO/main"
+GITHUB_RELEASES="https://github.com/$GITHUB_REPO/releases"
+SCRIPT_URL="$GITHUB_RAW/dnstt-deploy.sh"
+INSTALL_DIR="/usr/local/bin"
+CONFIG_DIR="/etc/dnstt"
+DNSTT_PORT="5300"
+DNSTT_USER="dnstt"
+CONFIG_FILE="$CONFIG_DIR/dnstt.conf"
+PRIVATE_KEY_FILE="$CONFIG_DIR/server.key"
+PUBLIC_KEY_FILE="$CONFIG_DIR/server.pub"
+SCRIPT_INSTALL_PATH="/usr/local/bin/dnstt-deploy"
+SERVICE_NAME="dnstt-server"
+UPDATE_AVAILABLE=false
+
+# ==================== Output Functions ====================
+
+print_status() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+print_question() {
+    echo -ne "${BLUE}[?]${NC} $1"
+}
+
+print_header() {
+    echo ""
+    echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${WHITE}              dnstt-fast Server Manager                       ${CYAN}║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+print_success_box() {
+    echo ""
+    echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║              SETUP COMPLETED SUCCESSFULLY!                   ║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${CYAN}Configuration Details:${NC}"
+    echo -e "  Subdomain:    ${YELLOW}$NS_SUBDOMAIN${NC}"
+    echo -e "  MTU:          ${YELLOW}$MTU_VALUE${NC}"
+    echo -e "  Tunnel mode:  ${YELLOW}$TUNNEL_MODE${NC}"
+    echo -e "  Listen port:  ${YELLOW}$DNSTT_PORT${NC} (redirected from 53)"
+    echo ""
+    echo -e "${CYAN}Public Key:${NC}"
+    echo -e "${YELLOW}$(cat "$PUBLIC_KEY_FILE")${NC}"
+    echo ""
+    echo -e "${CYAN}Management Commands:${NC}"
+    echo -e "  Menu:     ${WHITE}dnstt-deploy${NC}"
+    echo -e "  Status:   ${WHITE}systemctl status $SERVICE_NAME${NC}"
+    echo -e "  Logs:     ${WHITE}journalctl -u $SERVICE_NAME -f${NC}"
+    echo -e "  Restart:  ${WHITE}systemctl restart $SERVICE_NAME${NC}"
+
+    if [ "$TUNNEL_MODE" = "socks" ]; then
+        echo ""
+        echo -e "${CYAN}SOCKS Proxy:${NC}"
+        echo -e "  Running on ${YELLOW}127.0.0.1:1080${NC}"
+        echo -e "  Status:   ${WHITE}systemctl status danted${NC}"
+    fi
+    echo ""
+}
+
+# ==================== System Detection ====================
+
+detect_os() {
     if [ -f /etc/os-release ]; then
         . /etc/os-release
         OS=$ID
+    else
+        print_error "Cannot detect OS"
+        exit 1
     fi
 
     if command -v dnf &>/dev/null; then
@@ -35,99 +110,149 @@ detect_system() {
     elif command -v apt-get &>/dev/null; then
         PKG_MANAGER="apt"
     else
-        echo -e "${RED}Unsupported package manager${NC}"
+        print_error "Unsupported package manager"
         exit 1
     fi
 
-    ARCH=$(uname -m)
-    case "$ARCH" in
-        x86_64)  ARCH="amd64" ;;
-        aarch64) ARCH="arm64" ;;
-        armv7l)  ARCH="arm" ;;
-        i686)    ARCH="386" ;;
-    esac
+    print_status "Detected OS: $OS ($PKG_MANAGER)"
 }
 
-# Get default network interface
+detect_arch() {
+    local arch
+    arch=$(uname -m)
+    case $arch in
+        x86_64)     ARCH="amd64" ;;
+        aarch64)    ARCH="arm64" ;;
+        armv7l)     ARCH="arm" ;;
+        i386|i686)  ARCH="386" ;;
+        *)
+            print_error "Unsupported architecture: $arch"
+            exit 1
+            ;;
+    esac
+    print_status "Detected architecture: $ARCH"
+}
+
 get_default_interface() {
     ip route | grep default | awk '{print $5}' | head -1
 }
 
-# Load existing configuration
+get_ssh_port() {
+    ss -tlnp | grep sshd | awk '{print $4}' | grep -oE '[0-9]+$' | head -1
+}
+
+# ==================== Configuration ====================
+
 load_config() {
     if [ -f "$CONFIG_FILE" ]; then
         source "$CONFIG_FILE"
+        return 0
     fi
+    return 1
 }
 
-# Save configuration
 save_config() {
     mkdir -p "$CONFIG_DIR"
     cat > "$CONFIG_FILE" << EOF
+# dnstt-fast Server Configuration
+# Generated on $(date)
+
 NS_SUBDOMAIN="$NS_SUBDOMAIN"
 MTU_VALUE="$MTU_VALUE"
 TUNNEL_MODE="$TUNNEL_MODE"
+PRIVATE_KEY_FILE="$PRIVATE_KEY_FILE"
+PUBLIC_KEY_FILE="$PUBLIC_KEY_FILE"
 EOF
+    chmod 640 "$CONFIG_FILE"
+    print_status "Configuration saved"
 }
 
-# Install dependencies
-install_deps() {
-    echo -e "${BLUE}Installing dependencies...${NC}"
+# ==================== Installation ====================
+
+install_dependencies() {
+    print_status "Installing dependencies..."
     case "$PKG_MANAGER" in
         apt)
             apt-get update -qq
-            apt-get install -y -qq git golang iptables iptables-persistent
+            apt-get install -y -qq curl iptables iptables-persistent
             ;;
         dnf|yum)
-            $PKG_MANAGER install -y -q git golang iptables iptables-services
+            $PKG_MANAGER install -y -q curl iptables iptables-services
             ;;
     esac
 }
 
-# Create dnstt user
 create_user() {
     if ! id "$DNSTT_USER" &>/dev/null; then
         useradd -r -s /bin/false "$DNSTT_USER"
+        print_status "Created user: $DNSTT_USER"
     fi
 }
 
-# Build and install binary
+get_latest_release() {
+    curl -sL "https://api.github.com/repos/$GITHUB_REPO/releases/latest" | \
+        grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
+}
+
+download_binary() {
+    local version="$1"
+    local binary_name="dnstt-server-linux-$ARCH"
+    local download_url="$GITHUB_RELEASES/download/$version/$binary_name"
+
+    print_status "Downloading $binary_name ($version)..."
+
+    if curl -sL "$download_url" -o "$INSTALL_DIR/dnstt-server"; then
+        chmod +x "$INSTALL_DIR/dnstt-server"
+        print_status "Binary installed to $INSTALL_DIR/dnstt-server"
+        return 0
+    else
+        print_error "Failed to download binary"
+        return 1
+    fi
+}
+
 install_binary() {
-    BINARY_PATH="$INSTALL_DIR/dnstt-server"
+    local version
+    version=$(get_latest_release)
 
-    echo -e "${BLUE}Building dnstt-server...${NC}"
-    cd "$REPO_DIR/dnstt-server"
-    go build -o "$BINARY_PATH" .
+    if [ -z "$version" ]; then
+        print_error "Could not fetch latest release version"
+        exit 1
+    fi
 
-    chmod +x "$BINARY_PATH"
-    echo -e "${GREEN}Binary built and installed${NC}"
+    print_status "Latest release: $version"
+    download_binary "$version"
 }
 
-# Generate keys
 generate_keys() {
-    PRIVKEY_FILE="$CONFIG_DIR/server.key"
-    PUBKEY_FILE="$CONFIG_DIR/server.pub"
-
-    if [ ! -f "$PRIVKEY_FILE" ]; then
-        echo -e "${BLUE}Generating keypair...${NC}"
-        "$INSTALL_DIR/dnstt-server" -gen-key -privkey-file "$PRIVKEY_FILE" -pubkey-file "$PUBKEY_FILE"
-        chown "$DNSTT_USER:$DNSTT_USER" "$PRIVKEY_FILE" "$PUBKEY_FILE"
-        chmod 600 "$PRIVKEY_FILE"
-        chmod 644 "$PUBKEY_FILE"
+    if [ ! -f "$PRIVATE_KEY_FILE" ]; then
+        print_status "Generating keypair..."
+        "$INSTALL_DIR/dnstt-server" -gen-key -privkey-file "$PRIVATE_KEY_FILE" -pubkey-file "$PUBLIC_KEY_FILE"
+        chown "$DNSTT_USER:$DNSTT_USER" "$PRIVATE_KEY_FILE" "$PUBLIC_KEY_FILE"
+        chmod 600 "$PRIVATE_KEY_FILE"
+        chmod 644 "$PUBLIC_KEY_FILE"
+        print_status "Keypair generated"
+    else
+        print_status "Using existing keypair"
     fi
 }
 
-# Configure iptables for DNS redirection
-configure_iptables() {
-    echo -e "${BLUE}Configuring iptables...${NC}"
+# ==================== Network Configuration ====================
 
-    # Remove existing rules if any
-    iptables -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-port 5300 2>/dev/null || true
-    ip6tables -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-port 5300 2>/dev/null || true
+configure_iptables() {
+    print_status "Configuring iptables (53 -> $DNSTT_PORT)..."
+
+    # Remove existing rules
+    iptables -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-port $DNSTT_PORT 2>/dev/null || true
+    ip6tables -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-port $DNSTT_PORT 2>/dev/null || true
 
     # Add new rules
-    iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-port 5300
-    ip6tables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-port 5300
+    iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-port $DNSTT_PORT
+
+    # IPv6 if supported
+    if [ -f /proc/net/if_inet6 ] && command -v ip6tables &>/dev/null; then
+        ip6tables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-port $DNSTT_PORT 2>/dev/null || true
+    fi
 
     # Save rules
     if [ "$PKG_MANAGER" = "apt" ]; then
@@ -136,18 +261,19 @@ configure_iptables() {
         service iptables save 2>/dev/null || true
     fi
 
-    # Handle firewalld if active
+    # Handle firewalld
     if systemctl is-active --quiet firewalld; then
         firewall-cmd --permanent --add-port=53/udp 2>/dev/null || true
         firewall-cmd --reload 2>/dev/null || true
     fi
 
-    echo -e "${GREEN}iptables configured (53 -> 5300)${NC}"
+    print_status "iptables configured"
 }
 
-# Install Dante SOCKS proxy
+# ==================== SOCKS Proxy ====================
+
 install_dante() {
-    echo -e "${BLUE}Installing Dante SOCKS proxy...${NC}"
+    print_status "Installing Dante SOCKS proxy..."
 
     case "$PKG_MANAGER" in
         apt)
@@ -155,18 +281,19 @@ install_dante() {
             ;;
         dnf|yum)
             $PKG_MANAGER install -y -q dante-server 2>/dev/null || {
-                echo -e "${YELLOW}Dante not available, skipping${NC}"
-                return
+                print_warning "Dante not available in repos, skipping"
+                return 1
             }
             ;;
     esac
 
-    INTERFACE=$(get_default_interface)
+    local interface
+    interface=$(get_default_interface)
 
     cat > /etc/danted.conf << EOF
 logoutput: syslog
 internal: 127.0.0.1 port = 1080
-external: $INTERFACE
+external: $interface
 
 socksmethod: none
 clientmethod: none
@@ -184,33 +311,32 @@ EOF
 
     systemctl enable danted
     systemctl restart danted
-    echo -e "${GREEN}Dante running on 127.0.0.1:1080${NC}"
+    print_status "Dante running on 127.0.0.1:1080"
 }
 
-# Get SSH port
-get_ssh_port() {
-    ss -tlnp | grep sshd | awk '{print $4}' | grep -oE '[0-9]+$' | head -1
-}
+# ==================== Systemd Service ====================
 
-# Create systemd service
 create_service() {
+    local upstream
+
     if [ "$TUNNEL_MODE" = "socks" ]; then
-        UPSTREAM="127.0.0.1:1080"
+        upstream="127.0.0.1:1080"
     else
-        SSH_PORT=$(get_ssh_port)
-        UPSTREAM="127.0.0.1:${SSH_PORT:-22}"
+        local ssh_port
+        ssh_port=$(get_ssh_port)
+        upstream="127.0.0.1:${ssh_port:-22}"
     fi
 
-    cat > "/etc/systemd/system/${SERVICE_NAME}.service" << EOF
+    cat > "/etc/systemd/system/$SERVICE_NAME.service" << EOF
 [Unit]
-Description=dnstt DNS Tunnel Server
+Description=dnstt-fast DNS Tunnel Server
 After=network.target
 
 [Service]
 Type=simple
 User=$DNSTT_USER
 Group=$DNSTT_USER
-ExecStart=$INSTALL_DIR/dnstt-server -udp :5300 -privkey-file $CONFIG_DIR/server.key -mtu $MTU_VALUE $NS_SUBDOMAIN $UPSTREAM
+ExecStart=$INSTALL_DIR/dnstt-server -udp :$DNSTT_PORT -privkey-file $PRIVATE_KEY_FILE -mtu $MTU_VALUE $NS_SUBDOMAIN $upstream
 Restart=always
 RestartSec=5
 LimitNOFILE=65535
@@ -229,83 +355,184 @@ WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload
+    print_status "Systemd service created"
 }
 
-# Start service
 start_service() {
     systemctl enable "$SERVICE_NAME"
     systemctl restart "$SERVICE_NAME"
 
     sleep 2
     if systemctl is-active --quiet "$SERVICE_NAME"; then
-        echo -e "${GREEN}Service started successfully${NC}"
+        print_status "Service started successfully"
+        return 0
     else
-        echo -e "${RED}Service failed to start${NC}"
-        journalctl -u "$SERVICE_NAME" -n 20 --no-pager
+        print_error "Service failed to start"
+        journalctl -u "$SERVICE_NAME" -n 10 --no-pager
+        return 1
     fi
 }
 
-# Show public key
-show_pubkey() {
-    echo ""
-    echo -e "${GREEN}========== PUBLIC KEY ==========${NC}"
-    cat "$CONFIG_DIR/server.pub"
-    echo -e "${GREEN}=================================${NC}"
-    echo ""
+# ==================== Script Self-Management ====================
+
+install_script() {
+    print_status "Installing dnstt-deploy script..."
+
+    local temp_script="/tmp/dnstt-deploy-new.sh"
+
+    if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then
+        print_error "Failed to download script"
+        return 1
+    fi
+
+    chmod +x "$temp_script"
+
+    if [ -f "$SCRIPT_INSTALL_PATH" ]; then
+        local current_checksum new_checksum
+        current_checksum=$(sha256sum "$SCRIPT_INSTALL_PATH" 2>/dev/null | cut -d' ' -f1)
+        new_checksum=$(sha256sum "$temp_script" | cut -d' ' -f1)
+
+        if [ "$current_checksum" = "$new_checksum" ]; then
+            print_status "Script is already up to date"
+            rm "$temp_script"
+            return 0
+        fi
+    fi
+
+    cp "$temp_script" "$SCRIPT_INSTALL_PATH"
+    rm "$temp_script"
+    print_status "Script installed to $SCRIPT_INSTALL_PATH"
 }
 
-# Installation
+check_for_updates() {
+    if [ "$0" != "$SCRIPT_INSTALL_PATH" ]; then
+        return
+    fi
+
+    local temp_script="/tmp/dnstt-deploy-check.sh"
+    if curl -sL "$SCRIPT_URL" -o "$temp_script" 2>/dev/null; then
+        local current_checksum latest_checksum
+        current_checksum=$(sha256sum "$SCRIPT_INSTALL_PATH" | cut -d' ' -f1)
+        latest_checksum=$(sha256sum "$temp_script" | cut -d' ' -f1)
+
+        if [ "$current_checksum" != "$latest_checksum" ]; then
+            UPDATE_AVAILABLE=true
+        fi
+        rm -f "$temp_script"
+    fi
+}
+
+update_script() {
+    print_status "Checking for script updates..."
+
+    local temp_script="/tmp/dnstt-deploy-latest.sh"
+    if ! curl -sL "$SCRIPT_URL" -o "$temp_script"; then
+        print_error "Failed to download latest version"
+        return 1
+    fi
+
+    local current_checksum latest_checksum
+    current_checksum=$(sha256sum "$SCRIPT_INSTALL_PATH" 2>/dev/null | cut -d' ' -f1)
+    latest_checksum=$(sha256sum "$temp_script" | cut -d' ' -f1)
+
+    if [ "$current_checksum" = "$latest_checksum" ]; then
+        print_status "Already running the latest version"
+        rm "$temp_script"
+        return 0
+    fi
+
+    print_status "New version found, updating..."
+    chmod +x "$temp_script"
+    cp "$temp_script" "$SCRIPT_INSTALL_PATH"
+    rm "$temp_script"
+    print_status "Script updated! Restarting..."
+    exec "$SCRIPT_INSTALL_PATH"
+}
+
+update_binary() {
+    print_status "Checking for binary updates..."
+
+    detect_arch
+
+    if [ -f "$INSTALL_DIR/dnstt-server" ]; then
+        cp "$INSTALL_DIR/dnstt-server" "$INSTALL_DIR/dnstt-server.bak"
+    fi
+
+    if install_binary; then
+        systemctl restart "$SERVICE_NAME" 2>/dev/null || true
+
+        if systemctl is-active --quiet "$SERVICE_NAME"; then
+            print_status "Binary updated successfully"
+            rm -f "$INSTALL_DIR/dnstt-server.bak"
+        else
+            print_warning "Service not running after update, rolling back..."
+            mv "$INSTALL_DIR/dnstt-server.bak" "$INSTALL_DIR/dnstt-server"
+            systemctl restart "$SERVICE_NAME"
+        fi
+    else
+        print_error "Update failed"
+        if [ -f "$INSTALL_DIR/dnstt-server.bak" ]; then
+            mv "$INSTALL_DIR/dnstt-server.bak" "$INSTALL_DIR/dnstt-server"
+        fi
+    fi
+}
+
+# ==================== Main Installation ====================
+
 do_install() {
-    if [ "$EUID" -ne 0 ]; then
-        echo -e "${RED}Please run as root${NC}"
-        exit 1
-    fi
-
-    detect_system
+    detect_os
+    detect_arch
     load_config
 
-    echo -e "${GREEN}"
-    echo "╔══════════════════════════════════════════╗"
-    echo "║     dnstt-server Installation            ║"
-    echo "╚══════════════════════════════════════════╝"
-    echo -e "${NC}"
+    print_header
 
     # Get NS subdomain
-    read -p "Enter nameserver subdomain (e.g., t1.example.com) [$NS_SUBDOMAIN]: " input
+    print_question "Enter nameserver subdomain (e.g., t.example.com)"
+    if [ -n "$NS_SUBDOMAIN" ]; then
+        echo -ne " [${YELLOW}$NS_SUBDOMAIN${NC}]: "
+    else
+        echo -ne ": "
+    fi
+    read -r input
     NS_SUBDOMAIN="${input:-$NS_SUBDOMAIN}"
+
     if [ -z "$NS_SUBDOMAIN" ]; then
-        echo -e "${RED}Subdomain is required${NC}"
+        print_error "Subdomain is required"
         exit 1
     fi
 
     # Get MTU
-    read -p "Enter MTU value [${MTU_VALUE:-1232}]: " input
+    print_question "Enter MTU value [${YELLOW}${MTU_VALUE:-1232}${NC}]: "
+    read -r input
     MTU_VALUE="${input:-${MTU_VALUE:-1232}}"
 
     # Get tunnel mode
     echo ""
-    echo "Tunnel mode:"
+    echo -e "${CYAN}Tunnel mode:${NC}"
     echo "  1) SOCKS proxy (Dante on 127.0.0.1:1080)"
     echo "  2) SSH"
-    read -p "Select mode [1]: " mode_choice
+    print_question "Select mode [${YELLOW}1${NC}]: "
+    read -r mode_choice
     case "$mode_choice" in
         2) TUNNEL_MODE="ssh" ;;
         *) TUNNEL_MODE="socks" ;;
     esac
 
     echo ""
-    echo -e "${BLUE}Configuration:${NC}"
-    echo "  Subdomain: $NS_SUBDOMAIN"
-    echo "  MTU: $MTU_VALUE"
-    echo "  Mode: $TUNNEL_MODE"
+    echo -e "${CYAN}Configuration Summary:${NC}"
+    echo -e "  Subdomain: ${YELLOW}$NS_SUBDOMAIN${NC}"
+    echo -e "  MTU:       ${YELLOW}$MTU_VALUE${NC}"
+    echo -e "  Mode:      ${YELLOW}$TUNNEL_MODE${NC}"
     echo ""
-    read -p "Continue? (Y/n): " confirm
+    print_question "Continue? (Y/n): "
+    read -r confirm
     if [ "$confirm" = "n" ] || [ "$confirm" = "N" ]; then
         exit 0
     fi
 
+    echo ""
     save_config
-    install_deps
+    install_dependencies
     create_user
     mkdir -p "$CONFIG_DIR"
     chown "$DNSTT_USER:$DNSTT_USER" "$CONFIG_DIR"
@@ -320,108 +547,124 @@ do_install() {
 
     create_service
     start_service
-    show_pubkey
+    install_script
 
-    echo -e "${BLUE}Commands:${NC}"
-    echo "  Status:  systemctl status $SERVICE_NAME"
-    echo "  Logs:    journalctl -u $SERVICE_NAME -f"
-    echo "  Restart: systemctl restart $SERVICE_NAME"
-    echo ""
+    print_success_box
 }
 
-# Show status
+# ==================== Menu Actions ====================
+
 do_status() {
-    systemctl status "$SERVICE_NAME" --no-pager
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        print_status "Service is ${GREEN}running${NC}"
+    else
+        print_warning "Service is ${RED}stopped${NC}"
+    fi
+    echo ""
+    systemctl status "$SERVICE_NAME" --no-pager -l
 }
 
-# Show logs
 do_logs() {
+    print_status "Showing logs (Ctrl+C to exit)..."
     journalctl -u "$SERVICE_NAME" -f
 }
 
-# Show config info
 do_info() {
-    load_config
+    if ! load_config; then
+        print_warning "No configuration found. Run install first."
+        return 1
+    fi
+
     echo ""
-    echo -e "${BLUE}Configuration:${NC}"
-    echo "  Subdomain: $NS_SUBDOMAIN"
-    echo "  MTU: $MTU_VALUE"
-    echo "  Mode: $TUNNEL_MODE"
+    echo -e "${CYAN}Configuration:${NC}"
+    echo -e "  Subdomain:    ${YELLOW}$NS_SUBDOMAIN${NC}"
+    echo -e "  MTU:          ${YELLOW}$MTU_VALUE${NC}"
+    echo -e "  Tunnel mode:  ${YELLOW}$TUNNEL_MODE${NC}"
+    echo -e "  Listen port:  ${YELLOW}$DNSTT_PORT${NC}"
     echo ""
 
-    if [ -f "$CONFIG_DIR/server.pub" ]; then
-        show_pubkey
-    fi
-}
-
-# Update binary
-do_update() {
-    if [ "$EUID" -ne 0 ]; then
-        echo -e "${RED}Please run as root${NC}"
-        exit 1
+    if [ -f "$PUBLIC_KEY_FILE" ]; then
+        echo -e "${CYAN}Public Key:${NC}"
+        echo -e "${YELLOW}$(cat "$PUBLIC_KEY_FILE")${NC}"
     fi
 
-    detect_system
-
-    if [ -f "$INSTALL_DIR/dnstt-server" ]; then
-        cp "$INSTALL_DIR/dnstt-server" "$INSTALL_DIR/dnstt-server.bak"
-    fi
-
-    echo -e "${BLUE}Pulling latest changes...${NC}"
-    cd "$REPO_DIR"
-    git pull || true
-
-    install_binary
-    systemctl restart "$SERVICE_NAME"
-
+    echo ""
     if systemctl is-active --quiet "$SERVICE_NAME"; then
-        echo -e "${GREEN}Update complete${NC}"
-        rm -f "$INSTALL_DIR/dnstt-server.bak"
+        echo -e "Service status: ${GREEN}Running${NC}"
     else
-        echo -e "${YELLOW}Rolling back...${NC}"
-        mv "$INSTALL_DIR/dnstt-server.bak" "$INSTALL_DIR/dnstt-server"
-        systemctl restart "$SERVICE_NAME"
+        echo -e "Service status: ${RED}Stopped${NC}"
     fi
+    echo ""
 }
 
-# Menu
+# ==================== Menu ====================
+
 show_menu() {
     clear
-    echo -e "${GREEN}"
-    echo "╔══════════════════════════════════════════╗"
-    echo "║          dnstt-server Manager            ║"
-    echo "╚══════════════════════════════════════════╝"
-    echo -e "${NC}"
+    print_header
+
+    if [ "$UPDATE_AVAILABLE" = true ]; then
+        echo -e "${YELLOW}[UPDATE AVAILABLE]${NC} New version of this script available!"
+        echo ""
+    fi
+
     echo "  1) Install / Reconfigure"
     echo "  2) Update binary"
-    echo "  3) Service status"
-    echo "  4) View logs"
-    echo "  5) Show config info"
+    echo "  3) Update script"
+    echo "  4) Service status"
+    echo "  5) View logs"
+    echo "  6) Show config info"
     echo "  0) Exit"
     echo ""
-    read -p "Select option: " choice
-
-    case "$choice" in
-        1) do_install ;;
-        2) do_update ;;
-        3) do_status ;;
-        4) do_logs ;;
-        5) do_info ;;
-        0) exit 0 ;;
-        *) show_menu ;;
-    esac
+    print_question "Select option: "
 }
 
-# Main
-if [ $# -eq 0 ]; then
-    show_menu
-else
-    case "$1" in
-        install) do_install ;;
-        update) do_update ;;
-        status) do_status ;;
-        logs) do_logs ;;
-        info) do_info ;;
-        *) show_menu ;;
-    esac
-fi
+handle_menu() {
+    while true; do
+        show_menu
+        read -r choice
+
+        case $choice in
+            1) do_install ;;
+            2) update_binary ;;
+            3) update_script ;;
+            4) do_status ;;
+            5) do_logs ;;
+            6) do_info ;;
+            0)
+                print_status "Goodbye!"
+                exit 0
+                ;;
+            *)
+                print_error "Invalid choice"
+                ;;
+        esac
+
+        if [ "$choice" != "5" ]; then
+            echo ""
+            print_question "Press Enter to continue..."
+            read -r
+        fi
+    done
+}
+
+# ==================== Main ====================
+
+main() {
+    check_for_updates
+
+    if [ $# -eq 0 ]; then
+        handle_menu
+    else
+        case "$1" in
+            install)  do_install ;;
+            update)   update_binary ;;
+            status)   do_status ;;
+            logs)     do_logs ;;
+            info)     do_info ;;
+            *)        handle_menu ;;
+        esac
+    fi
+}
+
+main "$@"

@@ -44,33 +44,65 @@ NS    t.example.com      tns.example.com
 
 ## Server Deployment
 
-Clone the repo and run the deploy script:
+### Quick Install (Recommended)
 
+Run this one-liner on your server:
+
+```bash
+curl -sL https://raw.githubusercontent.com/irannetdrifter/dnstt-fast/main/dnstt-deploy.sh | sudo bash
 ```
-git clone <repo-url>
-cd dnstt
+
+Or download and run manually:
+
+```bash
+curl -sLO https://raw.githubusercontent.com/irannetdrifter/dnstt-fast/main/dnstt-deploy.sh
+chmod +x dnstt-deploy.sh
 sudo ./dnstt-deploy.sh
 ```
 
-Menu options:
-  1) Install / Reconfigure - Full server setup
-  2) Update binary - Pull latest changes and rebuild
-  3) Service status - Check systemd service
-  4) View logs - Stream server logs
-  5) Show config info - Display configuration and public key
+### Menu Options
 
-The script:
-  - Installs dependencies (git, golang)
-  - Builds dnstt-server from source
-  - Generates keypair
-  - Configures iptables DNS redirection (53 -> 5300)
-  - Sets up Dante SOCKS proxy (optional)
-  - Creates systemd service
+After installation, run `dnstt-deploy` from anywhere:
+
+```
+  1) Install / Reconfigure - Full server setup
+  2) Update binary - Download latest release
+  3) Update script - Update the deploy script itself
+  4) Service status - Check systemd service
+  5) View logs - Stream server logs
+  6) Show config info - Display configuration and public key
+```
+
+### What the Script Does
+
+- Downloads pre-built binary from GitHub releases
+- Creates dedicated `dnstt` system user
+- Generates encryption keypair
+- Configures iptables DNS redirection (53 → 5300)
+- Sets up Dante SOCKS proxy (optional)
+- Creates systemd service with auto-restart
+- Installs itself to `/usr/local/bin/dnstt-deploy` for easy updates
+
+### Supported Systems
+
+- **Debian/Ubuntu** (apt)
+- **Fedora/Rocky/CentOS** (dnf/yum)
+- **Architectures**: amd64, arm64
 
 Configuration is saved to `/etc/dnstt/dnstt.conf`.
 
 
 ## Client Usage
+
+### Download Client
+
+Download the pre-built client for your platform from [GitHub Releases](https://github.com/irannetdrifter/dnstt-fast/releases):
+
+- `dnstt-client-linux-amd64` - Linux x64
+- `dnstt-client-linux-arm64` - Linux ARM64
+- `dnstt-client-darwin-amd64` - macOS Intel
+- `dnstt-client-darwin-arm64` - macOS Apple Silicon
+- `dnstt-client-windows-amd64.exe` - Windows x64
 
 Copy `server.pub` from server to client.
 
