@@ -198,22 +198,24 @@ get_latest_release() {
 download_binary() {
     local version="$1"
     local binary_name="dnstt-server-linux-$ARCH"
-    local download_url="$GITHUB_RELEASES/download/$version/$binary_name"
+    local download_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${binary_name}"
     local temp_file="/tmp/dnstt-server-$$"
 
     print_status "Downloading $binary_name ($version)..."
+    print_status "From: $download_url"
 
-    if curl -fsSL "$download_url" -o "$temp_file"; then
-        mv "$temp_file" "$INSTALL_DIR/dnstt-server"
-        chmod +x "$INSTALL_DIR/dnstt-server"
-        print_status "Binary installed to $INSTALL_DIR/dnstt-server"
-        return 0
-    else
-        print_error "Failed to download binary"
-        print_error "URL: $download_url"
-        rm -f "$temp_file"
-        return 1
+    if curl -fSL "$download_url" -o "$temp_file" 2>&1; then
+        if [ -s "$temp_file" ]; then
+            mv "$temp_file" "$INSTALL_DIR/dnstt-server"
+            chmod +x "$INSTALL_DIR/dnstt-server"
+            print_status "Binary installed to $INSTALL_DIR/dnstt-server"
+            return 0
+        fi
     fi
+
+    print_error "Failed to download binary"
+    rm -f "$temp_file"
+    return 1
 }
 
 install_binary() {
