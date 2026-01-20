@@ -1,0 +1,203 @@
+dnstt-fast - High Performance DNS Tunnel
+========================================
+
+Fork of dnstt with performance optimizations and auto-connect features.
+
+Original: https://www.bamsoftware.com/software/dnstt/
+
+
+## Features Added in This Fork
+
+### Client Optimizations
+- **Parallel Tunnels** (`-tunnels N`): Multiple concurrent DNS connections
+  through the same resolver for higher throughput
+- **Auto-Connect**: Automatically tests resolvers and connects to the fastest
+  working one with failover support
+- **Resolver Testing**: Built-in DNS resolver tester with latency measurement
+- **Tunnel Pool**: Round-robin load balancing across multiple tunnels
+- **KCP Tuning**: Optimized KCP parameters (nodelay, window size, fast resend)
+- **Larger Buffers**: Increased smux stream buffers (4MB) for higher throughput
+
+### Server Optimizations
+- **Buffer Pooling**: sync.Pool for packet buffers reduces GC pressure
+- **RWMutex**: Read-write mutex for RemoteMap allows concurrent reads
+- **Larger Queues**: Increased channel buffer from 100 to 1024
+- **Cached Channels**: Channel refs cached in sendLoop to avoid lock contention
+
+### Infrastructure
+- **Deploy Script**: Automated server installation with menu interface
+- **GitHub Actions**: Automated builds for linux/darwin amd64/arm64
+
+
+## DNS Setup
+
+Add these records to your domain (example: example.com, server IP: 203.0.113.2):
+
+```
+A     tns.example.com    203.0.113.2
+AAAA  tns.example.com    2001:db8::2
+NS    t.example.com      tns.example.com
+```
+
+
+## Server Deployment
+
+Clone the repo and run the deploy script:
+
+```
+git clone <repo-url>
+cd dnstt
+sudo ./dnstt-deploy.sh
+```
+
+Menu options:
+  1) Install / Reconfigure - Full server setup
+  2) Update binary - Pull latest changes and rebuild
+  3) Service status - Check systemd service
+  4) View logs - Stream server logs
+  5) Show config info - Display configuration and public key
+
+The script:
+  - Installs dependencies (git, golang)
+  - Builds dnstt-server from source
+  - Generates keypair
+  - Configures iptables DNS redirection (53 -> 5300)
+  - Sets up Dante SOCKS proxy (optional)
+  - Creates systemd service
+
+Configuration is saved to `/etc/dnstt/dnstt.conf`.
+
+
+## Client Usage
+
+Copy `server.pub` from server to client.
+
+### Auto-Connect (Recommended)
+
+Automatically tests resolvers and connects using the fastest working one:
+
+```
+./dnstt-client -auto-connect -test-resolvers ir_dns_servers.txt \
+  -pubkey-file server.pub -tunnels 16 t.example.com 127.0.0.1:1080
+```
+
+This runs two phases:
+  1. Tests all resolvers for DNS connectivity (checks NXDOMAIN + empty AUTHORITY)
+  2. Tests actual tunnel connection with filtered resolvers
+
+The `-tunnels 16` creates 16 parallel DNS connections, increasing throughput
+by allowing concurrent queries. Connections are load-balanced round-robin.
+
+### Manual Connection
+
+#### DoH (DNS over HTTPS)
+```
+./dnstt-client -doh https://dns.google/dns-query \
+  -pubkey-file server.pub -tunnels 8 t.example.com 127.0.0.1:1080
+```
+
+#### DoT (DNS over TLS)
+```
+./dnstt-client -dot dns.google:853 \
+  -pubkey-file server.pub -tunnels 8 t.example.com 127.0.0.1:1080
+```
+
+#### UDP
+```
+./dnstt-client -udp 1.1.1.1:53 \
+  -pubkey-file server.pub -tunnels 8 t.example.com 127.0.0.1:1080
+```
+
+
+## Client Options
+
+```
+-doh URL              DoH resolver URL
+-dot ADDR             DoT resolver address (host:port)
+-udp ADDR             UDP DNS server address (host:port)
+-pubkey KEY           Server public key (hex)
+-pubkey-file FILE     Server public key file
+-tunnels N            Parallel tunnels for higher throughput (default 8)
+-mtu N                Max DNS response size (default 1232)
+-utls SPEC            TLS fingerprint (default: random)
+
+-auto-connect         Auto-select fastest working resolver
+-test-resolvers FILE  Test resolvers from file (one IP per line)
+-test-timeout MS      Resolver test timeout (default 2000)
+-test-concurrency N   Concurrent tests (default 500)
+-test-top N           Show top N results (default 50)
+-test-output FILE     Save working resolvers to file
+```
+
+### Resolver Testing Only
+
+Test resolvers without connecting:
+
+```
+./dnstt-client -test-resolvers ir_dns_servers.txt t.example.com
+```
+
+Output shows latency and filters resolvers that:
+  - Return NXDOMAIN for random subdomains
+  - Have empty AUTHORITY section (proper forwarding to our server)
+
+
+## Performance Tuning
+
+### Client Side
+- Use `-tunnels 8-32` depending on resolver capacity
+- Higher tunnel count = more concurrent DNS queries = higher throughput
+- Auto-connect picks resolvers with <500ms latency
+
+### Server Side
+The optimizations are built-in:
+- Buffer pool reuses packet memory
+- RWMutex allows parallel reads for existing connections
+- Larger channel buffers reduce packet drops under load
+
+
+## Testing
+
+Server side:
+```
+journalctl -u dnstt-server -f
+```
+
+Client side:
+```
+curl --proxy socks5h://127.0.0.1:1080 https://ifconfig.me
+```
+
+Speed test:
+```
+curl --proxy socks5h://127.0.0.1:1080 -o /dev/null https://speed.cloudflare.com/__down?bytes=10000000
+```
+
+
+## Architecture
+
+```
+.------.  |            .---------.             .------.
+|client|<---DoH/DoT--->|recursive|<--UDP DNS-->|server|
+'------'  |            |resolver |             '------'
+   |      |            '---------'                |
+.------.  |                                   .------.
+| app  |  |censored                           | proxy|
+'------'  |                                   '------'
+```
+
+The tunnel encrypts data end-to-end using Noise protocol. DoH/DoT hides
+the tunnel destination from local observers.
+
+
+## Files Changed from Upstream
+
+```
+dnstt-client/lib/client.go        - TunnelPool, createTunnel, KCP tuning
+dnstt-client/lib/resolver_tester.go - DNS resolver testing (new)
+dnstt-client/main.go              - auto-connect, test-resolvers flags
+dnstt-server/main.go              - -udp flag, larger channel buffer
+turbotunnel/queuepacketconn.go    - Buffer pooling with sync.Pool
+turbotunnel/remotemap.go          - RWMutex with fast read path
+turbotunnel/consts.go             - QueueSize 128 -> 512
+```

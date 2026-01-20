@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build binaries
+        run: |
+          # Linux
+          GOOS=linux GOARCH=amd64 go build -o dnstt-client-linux-amd64 ./dnstt-client
+          GOOS=linux GOARCH=arm64 go build -o dnstt-client-linux-arm64 ./dnstt-client
+
+          # macOS
+          GOOS=darwin GOARCH=amd64 go build -o dnstt-client-darwin-amd64 ./dnstt-client
+          GOOS=darwin GOARCH=arm64 go build -o dnstt-client-darwin-arm64 ./dnstt-client
+
+          # Windows
+          GOOS=windows GOARCH=amd64 go build -o dnstt-client-windows-amd64.exe ./dnstt-client
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dnstt-client-linux-amd64
+            dnstt-client-linux-arm64
+            dnstt-client-darwin-amd64
+            dnstt-client-darwin-arm64
+            dnstt-client-windows-amd64.exe
+            ir_dns_servers.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
