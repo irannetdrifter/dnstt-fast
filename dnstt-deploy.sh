@@ -3,8 +3,6 @@
 # dnstt-fast Server Setup Script
 # https://github.com/irannetdrifter/dnstt-fast
 
-set -e
-
 # Check if running as root
 if [[ $EUID -ne 0 ]]; then
     echo -e "\033[0;31m[ERROR]\033[0m This script must be run as root"
