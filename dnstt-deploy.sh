@@ -482,7 +482,7 @@ update_binary() {
 do_install() {
     detect_os
     detect_arch
-    load_config
+    load_config || true
 
     print_header
 
