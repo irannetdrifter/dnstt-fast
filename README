@@ -1,9 +1,11 @@
 dnstt-fast - High Performance DNS Tunnel
 ========================================
 
-Fork of dnstt with performance optimizations and auto-connect features.
+> **Forked from [dnstt](https://www.bamsoftware.com/git/dnstt.git) by David Fifield**
+>
+> Original project: https://www.bamsoftware.com/software/dnstt/
 
-Original: https://www.bamsoftware.com/software/dnstt/
+A fork of dnstt with performance optimizations and auto-connect features.
 
 
 ## Features Added in This Fork
