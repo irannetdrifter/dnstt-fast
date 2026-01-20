@@ -25,7 +25,7 @@
 
 ### Server Optimizations
 
-- **Zstd Compression** — Server-side compression (auto-detected)
+- **Zstd Compression** — Enabled by default, automatically compresses all traffic
 - **Buffer Pooling** — `sync.Pool` for packet buffers reduces GC pressure
 - **RWMutex** — Read-write mutex for concurrent reads
 - **Larger Queues** — Channel buffer increased from 100 to 1024
@@ -291,7 +291,8 @@ The tunnel encrypts data end-to-end using the **Noise protocol**. DoH/DoT hides 
 
 ### Server
 
-Optimizations are built-in:
+Optimizations are enabled by default:
+- Zstd compression enabled automatically
 - Buffer pool reuses packet memory
 - RWMutex allows parallel reads
 - Larger channel buffers reduce packet drops
