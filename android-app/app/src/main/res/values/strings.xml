@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DNSTT Client</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_connecting">Connecting...</string>
+    <string name="status_connected">Connected</string>
+    <string name="transport_type">Transport</string>
+    <string name="transport_addr">Resolver Address</string>
+    <string name="pubkey">Server Public Key</string>
+    <string name="domain">Domain</string>
+    <string name="tunnels">Parallel Tunnels</string>
+    <string name="settings">Settings</string>
+    <string name="stats">Statistics</string>
+    <string name="bytes_in">Download</string>
+    <string name="bytes_out">Upload</string>
+    <string name="active_streams">Active Connections</string>
+</resources>

@@ -33,15 +33,6 @@ const idleTimeout = 2 * time.Minute
 
 var sigChan = make(chan os.Signal, 1)
 
-// UseCompression enables zstd compression when true.
-// Must be set before creating tunnels and must match server configuration.
-var UseCompression = false
-
-// NumDNSSenders controls the number of parallel DNS query senders.
-// More senders = more parallel queries = higher throughput.
-// Default is 1 (sequential queries). Recommended: 2-4 for most cases.
-var NumDNSSenders = 1
-
 // Tunnel represents a single DNS tunnel with its own KCP, Noise, and smux session.
 type Tunnel struct {
 	pconn   net.PacketConn
@@ -212,9 +203,8 @@ func createTunnel(
 		return nil, fmt.Errorf("creating transport: %v", err)
 	}
 
-	// Wrap with DNS encoding, using parallel senders if configured
-	dnsConn := NewDNSPacketConnWithOptions(pconn, remoteAddr, domain, nil, NumDNSSenders)
-	pconn = dnsConn
+	// Wrap with DNS encoding
+	pconn = NewDNSPacketConn(pconn, remoteAddr, domain)
 
 	// Open a KCP conn on the PacketConn
 	kcpConn, err := kcp.NewConn2(remoteAddr, nil, 0, 0, pconn)
@@ -222,20 +212,6 @@ func createTunnel(
 		_ = pconn.Close()
 		return nil, fmt.Errorf("opening KCP conn: %v", err)
 	}
-
-	// Enable pacing-based polling using KCP's RTT as congestion indicator.
-	// When SRTT is low, we can poll more aggressively.
-	// Returns a "congestion score" - lower means more room to send.
-	dnsConn.SetKCPStateFunc(func() int {
-		srtt := kcpConn.GetSRTT() // smoothed RTT in milliseconds
-		// If SRTT > 500ms, congested - return high value to slow down
-		// If SRTT < 100ms, not congested - return low value to speed up
-		if srtt < 0 {
-			return 0 // No RTT data yet, poll aggressively
-		}
-		// Scale SRTT to a congestion score (0-16 range maps to pacingThreshold)
-		return int(srtt / 50) // ~100ms SRTT = score 2, ~400ms = score 8
-	})
 
 	// Configure KCP for maximum throughput
 	kcpConn.SetStreamMode(true)
@@ -261,27 +237,14 @@ func createTunnel(
 		return nil, fmt.Errorf("opening noise channel: %v", err)
 	}
 
-	// Optionally wrap with compression
-	var smuxRW io.ReadWriteCloser = rw
-	if UseCompression {
-		compressedRW, err := turbotunnel.NewCompressedReadWriteCloser(rw)
-		if err != nil {
-			_ = kcpConn.Close()
-			_ = pconn.Close()
-			return nil, fmt.Errorf("setting up compression: %v", err)
-		}
-		smuxRW = compressedRW
-		log.Printf("compression enabled (zstd)")
-	}
-
-	// Start a smux session on the Noise channel (optionally compressed)
+	// Start a smux session on the Noise channel
 	smuxConfig := smux.DefaultConfig()
 	smuxConfig.Version = 2
 	smuxConfig.KeepAliveTimeout = idleTimeout
 	smuxConfig.MaxStreamBuffer = 4 * 1024 * 1024 // Increased buffer for higher throughput
 	smuxConfig.MaxReceiveBuffer = 4 * 1024 * 1024
 	smuxConfig.MaxFrameSize = 32768 // Larger frames
-	sess, err := smux.Client(smuxRW, smuxConfig)
+	sess, err := smux.Client(rw, smuxConfig)
 	if err != nil {
 		_ = kcpConn.Close()
 		_ = pconn.Close()
@@ -967,4 +930,35 @@ func StartWithResolverFallback(config ResolverConfig) error {
 	poolMu.Unlock()
 	log.Println("dnstt is done.")
 	return nil
+}
+
+// ============================================================================
+// Exported functions for mobile/library use
+// ============================================================================
+
+// ParseDomain parses a domain string into a dns.Name.
+func ParseDomain(domainStr string) (dns.Name, error) {
+	return dns.ParseName(domainStr)
+}
+
+// CreateTunnelExported creates a single tunnel with all layers.
+// This is an exported wrapper around createTunnel for mobile use.
+func CreateTunnelExported(
+	utlsClientHelloID interface{},
+	pubkey []byte,
+	domain dns.Name,
+	mtu int,
+	transportType string,
+	transportArg string,
+) (*Tunnel, error) {
+	var utlsID *utls.ClientHelloID
+	if utlsClientHelloID != nil {
+		utlsID = utlsClientHelloID.(*utls.ClientHelloID)
+	}
+	return createTunnel(utlsID, pubkey, domain, mtu, transportType, transportArg)
+}
+
+// OpenStream opens a new stream on the tunnel's smux session.
+func (t *Tunnel) OpenStream() (net.Conn, error) {
+	return t.sess.OpenStream()
 }
