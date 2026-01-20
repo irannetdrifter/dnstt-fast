@@ -21,16 +21,20 @@ jobs:
 
       - name: Build binaries
         run: |
-          # Linux
+          # Client - Linux
           GOOS=linux GOARCH=amd64 go build -o dnstt-client-linux-amd64 ./dnstt-client
           GOOS=linux GOARCH=arm64 go build -o dnstt-client-linux-arm64 ./dnstt-client
 
-          # macOS
+          # Client - macOS
           GOOS=darwin GOARCH=amd64 go build -o dnstt-client-darwin-amd64 ./dnstt-client
           GOOS=darwin GOARCH=arm64 go build -o dnstt-client-darwin-arm64 ./dnstt-client
 
-          # Windows
+          # Client - Windows
           GOOS=windows GOARCH=amd64 go build -o dnstt-client-windows-amd64.exe ./dnstt-client
+
+          # Server - Linux
+          GOOS=linux GOARCH=amd64 go build -o dnstt-server-linux-amd64 ./dnstt-server
+          GOOS=linux GOARCH=arm64 go build -o dnstt-server-linux-arm64 ./dnstt-server
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -41,6 +45,8 @@ jobs:
             dnstt-client-darwin-amd64
             dnstt-client-darwin-arm64
             dnstt-client-windows-amd64.exe
+            dnstt-server-linux-amd64
+            dnstt-server-linux-arm64
             ir_dns_servers.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
