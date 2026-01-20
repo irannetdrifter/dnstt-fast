@@ -109,6 +109,8 @@ public class DnsttVpnService extends VpnService implements StatusCallback {
         config.setTunnels(tunnels);
         config.setMTU(1232);
         config.setUTLSFingerprint("Chrome");
+        config.setUseZstd(true); // Enable zstd compression (server has it on by default)
+        log("Zstd compression: enabled");
 
         new Thread(() -> {
             try {

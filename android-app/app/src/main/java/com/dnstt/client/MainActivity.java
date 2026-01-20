@@ -275,6 +275,8 @@ public class MainActivity extends AppCompatActivity implements StatusCallback {
 
         config.setMTU(1232);
         config.setUTLSFingerprint("Chrome");
+        config.setUseZstd(true); // Enable zstd compression (server has it on by default)
+        appendLog("Zstd compression: enabled");
 
         new Thread(() -> {
             try {
@@ -283,6 +285,7 @@ public class MainActivity extends AppCompatActivity implements StatusCallback {
             } catch (Exception e) {
                 handler.post(() -> {
                     appendLog("Connection error: " + e.getMessage());
+                    appendLog("Stack trace: " + android.util.Log.getStackTraceString(e));
                     setInputsEnabled(true);
                 });
             }

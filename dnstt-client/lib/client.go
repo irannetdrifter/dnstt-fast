@@ -33,6 +33,14 @@ const idleTimeout = 2 * time.Minute
 
 var sigChan = make(chan os.Signal, 1)
 
+// UseCompression enables zstd compression on the tunnel.
+// Must be set before calling Start* functions.
+var UseCompression = false
+
+// NumDNSSenders controls the number of parallel DNS query senders.
+// Higher values increase throughput but also load on the resolver.
+var NumDNSSenders = 1
+
 // Tunnel represents a single DNS tunnel with its own KCP, Noise, and smux session.
 type Tunnel struct {
 	pconn   net.PacketConn
@@ -237,14 +245,28 @@ func createTunnel(
 		return nil, fmt.Errorf("opening noise channel: %v", err)
 	}
 
-	// Start a smux session on the Noise channel
+	// Optionally wrap with compression
+	var smuxRW io.ReadWriteCloser = rw
+	if UseCompression {
+		compressedRW, err := turbotunnel.NewCompressedReadWriteCloser(rw)
+		if err != nil {
+			_ = rw.Close()
+			_ = kcpConn.Close()
+			_ = pconn.Close()
+			return nil, fmt.Errorf("creating compression layer: %v", err)
+		}
+		smuxRW = compressedRW
+		log.Printf("zstd compression enabled")
+	}
+
+	// Start a smux session on the Noise channel (possibly with compression)
 	smuxConfig := smux.DefaultConfig()
 	smuxConfig.Version = 2
 	smuxConfig.KeepAliveTimeout = idleTimeout
 	smuxConfig.MaxStreamBuffer = 4 * 1024 * 1024 // Increased buffer for higher throughput
 	smuxConfig.MaxReceiveBuffer = 4 * 1024 * 1024
 	smuxConfig.MaxFrameSize = 32768 // Larger frames
-	sess, err := smux.Client(rw, smuxConfig)
+	sess, err := smux.Client(smuxRW, smuxConfig)
 	if err != nil {
 		_ = kcpConn.Close()
 		_ = pconn.Close()

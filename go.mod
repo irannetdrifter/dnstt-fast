@@ -13,6 +13,7 @@ require (
 )
 
 require (
+	github.com/klauspost/compress v1.18.3 // indirect
 	github.com/klauspost/cpuid v1.3.1 // indirect
 	github.com/klauspost/reedsolomon v1.9.9 // indirect
 	github.com/mmcloughlin/avo v0.0.0-20200803215136-443f81d77104 // indirect

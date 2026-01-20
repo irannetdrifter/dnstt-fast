@@ -43,6 +43,7 @@ type Config struct {
 	Tunnels         int
 	MTU             int
 	UTLSFingerprint string
+	UseZstd         bool // Enable zstd compression (server must also have -zstd flag)
 }
 
 // NewConfig creates a default configuration.
@@ -54,8 +55,20 @@ func NewConfig() *Config {
 		Tunnels:         8,
 		MTU:             1232,
 		UTLSFingerprint: "Chrome",
+		UseZstd:         true, // Default to enabled (server has it on by default)
 	}
 }
+
+// Setter methods for gomobile compatibility
+func (c *Config) SetTransportType(v string)   { c.TransportType = v }
+func (c *Config) SetTransportAddr(v string)   { c.TransportAddr = v }
+func (c *Config) SetPubkeyHex(v string)       { c.PubkeyHex = v }
+func (c *Config) SetDomain(v string)          { c.Domain = v }
+func (c *Config) SetListenAddr(v string)      { c.ListenAddr = v }
+func (c *Config) SetTunnels(v int)            { c.Tunnels = v }
+func (c *Config) SetMTU(v int)                { c.MTU = v }
+func (c *Config) SetUTLSFingerprint(v string) { c.UTLSFingerprint = v }
+func (c *Config) SetUseZstd(v bool)           { c.UseZstd = v }
 
 // Client represents a dnstt tunnel client for mobile.
 type Client struct {
@@ -160,6 +173,12 @@ func (c *Client) Start(cfg *Config) error {
 	mtu := cfg.MTU
 	if mtu < 512 {
 		mtu = 1232
+	}
+
+	// Set compression flag before creating tunnels
+	dnstt.UseCompression = cfg.UseZstd
+	if cfg.UseZstd {
+		log.Printf("zstd compression enabled")
 	}
 
 	// Create tunnels
