@@ -3,6 +3,9 @@
 # dnstt-fast Server Setup Script
 # https://github.com/irannetdrifter/dnstt-fast
 
+# Reopen stdin from terminal (needed for curl download + run)
+exec < /dev/tty
+
 # Check if running as root
 if [[ $EUID -ne 0 ]]; then
     echo -e "\033[0;31m[ERROR]\033[0m This script must be run as root"
@@ -198,13 +201,15 @@ download_binary() {
     local download_url="$GITHUB_RELEASES/download/$version/$binary_name"
 
     print_status "Downloading $binary_name ($version)..."
+    print_status "URL: $download_url"
 
-    if curl -sL "$download_url" -o "$INSTALL_DIR/dnstt-server"; then
+    curl -fsSL "$download_url" -o "$INSTALL_DIR/dnstt-server"
+    if [ $? -eq 0 ] && [ -f "$INSTALL_DIR/dnstt-server" ] && [ -s "$INSTALL_DIR/dnstt-server" ]; then
         chmod +x "$INSTALL_DIR/dnstt-server"
         print_status "Binary installed to $INSTALL_DIR/dnstt-server"
         return 0
     else
-        print_error "Failed to download binary"
+        print_error "Failed to download binary from $download_url"
         return 1
     fi
 }
