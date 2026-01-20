@@ -52,7 +52,7 @@ NS    t.example.com      tns.example.com
 ### 2. Server Installation
 
 ```bash
-curl -sL https://raw.githubusercontent.com/irannetdrifter/dnstt-fast/main/dnstt-deploy.sh | sudo bash
+sudo bash <(curl -sL https://raw.githubusercontent.com/irannetdrifter/dnstt-fast/main/dnstt-deploy.sh)
 ```
 
 ### 3. Client Setup
@@ -83,7 +83,7 @@ chmod +x dnstt-client-darwin-arm64
 ### One-liner Install
 
 ```bash
-curl -sL https://raw.githubusercontent.com/irannetdrifter/dnstt-fast/main/dnstt-deploy.sh | sudo bash
+sudo bash <(curl -sL https://raw.githubusercontent.com/irannetdrifter/dnstt-fast/main/dnstt-deploy.sh)
 ```
 
 ### Manual Install
