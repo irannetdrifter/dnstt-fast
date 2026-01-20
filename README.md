@@ -138,6 +138,7 @@ After installation, run `dnstt-deploy` from anywhere:
 | macOS Intel | [`dnstt-client-darwin-amd64`](https://github.com/irannetdrifter/dnstt-fast/releases/latest/download/dnstt-client-darwin-amd64) |
 | macOS Apple Silicon | [`dnstt-client-darwin-arm64`](https://github.com/irannetdrifter/dnstt-fast/releases/latest/download/dnstt-client-darwin-arm64) |
 | Windows x64 | [`dnstt-client-windows-amd64.exe`](https://github.com/irannetdrifter/dnstt-fast/releases/latest/download/dnstt-client-windows-amd64.exe) |
+| Android | Coming soon |
 
 ### Examples
 
